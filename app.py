@@ -8,10 +8,10 @@ from models import (
     ORDER_STATUSES, STATUS_LABELS, authenticate_user, create_account,
     create_feedback, create_initial_admin, create_order, delete_feedback,
     delete_order, delete_product, delete_promocode, delete_user, get_all_feedback,
-    get_available_promocodes,
+    delete_category, get_available_promocodes, get_categories,
     get_db, get_orders, get_product, get_products, get_promocodes, get_user,
     get_user_orders, get_users, has_admin, init_app, init_db, save_product,
-    save_promocode, save_user, update_order, update_order_status,
+    save_category, save_promocode, save_user, update_order, update_order_status,
 )
 
 app = Flask(__name__)
@@ -173,7 +173,27 @@ def admin_delete_feedback(feedback_id):
 
 @app.route("/admin/products")
 def admin_products():
-    return render_template("admin_products.html", products=get_products())
+    return render_template("admin_products.html", products=get_products(), categories=get_categories())
+
+
+@app.post("/admin/categories/save")
+def admin_save_category():
+    category_id = request.form.get("category_id", "").strip()
+    parent_id = request.form.get("parent_id", "").strip()
+    try:
+        save_category(int(category_id) if category_id else None,
+                      request.form.get("name", ""), int(parent_id) if parent_id else None)
+        flash("Категорію збережено.", "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("admin_products"))
+
+
+@app.post("/admin/categories/<int:category_id>/delete")
+def admin_delete_category(category_id):
+    flash("Категорію видалено. Товари та підкатегорії перенесено на батьківський рівень."
+          if delete_category(category_id) else "Категорію не знайдено.", "success")
+    return redirect(url_for("admin_products"))
 
 
 def product_form_values():
@@ -181,6 +201,7 @@ def product_form_values():
     skin = request.form.get("skin", "").strip()
     quality = request.form.get("quality", "").strip()
     image_url = request.form.get("image_url", "").strip()
+    category_value = request.form.get("category_id", "").strip()
     try:
         price = float(request.form.get("price", ""))
         stock = int(request.form.get("stock", ""))
@@ -188,7 +209,11 @@ def product_form_values():
         raise ValueError("Ціна має бути числом, а залишок — цілим числом.")
     if not weapon or not skin or not quality or price < 0 or stock < 0:
         raise ValueError("Заповни назву, стан, ціну та залишок коректно.")
-    return weapon, skin, quality, price, image_url, stock
+    try:
+        category_id = int(category_value) if category_value else None
+    except ValueError:
+        raise ValueError("Обери коректну категорію товару.")
+    return weapon, skin, quality, price, image_url, stock, category_id
 
 
 @app.post("/admin/products/save")
@@ -357,6 +382,21 @@ def admin_delete_order(order_id):
 @app.route("/shop")
 def shop():
     all_products = get_products()
+    categories = get_categories()
+    category_value = request.args.get("category_id", "").strip()
+    try:
+        selected_category = int(category_value) if category_value else None
+    except ValueError:
+        selected_category = None
+    category_ids = set()
+    if selected_category is not None:
+        category_ids.add(selected_category)
+        while True:
+            children = {category["id"] for category in categories if category["parent_id"] in category_ids}
+            updated = category_ids | children
+            if updated == category_ids:
+                break
+            category_ids = updated
     query = request.args.get("q", "").strip()
     weapon = request.args.get("weapon", "").strip()
     quality = request.args.get("quality", "").strip()
@@ -376,6 +416,7 @@ def shop():
                 if (not query or query.casefold() in f"{product['weapon']} {product['skin']} {product['quality']}".casefold())
                 and (not weapon or product["weapon"] == weapon)
                 and (not quality or product["quality"] == quality)
+                and (selected_category is None or product["category_id"] in category_ids)
                 and (availability != "in_stock" or product["stock"] > 0)
                 and (price_min is None or product["price"] >= price_min)
                 and (price_max is None or product["price"] <= price_max)]
@@ -392,10 +433,13 @@ def shop():
         products=products,
         promocodes=get_available_promocodes(),
         filters={"q": query, "weapon": weapon, "quality": quality,
+                 "category_id": selected_category,
                  "availability": availability, "price_min": request.args.get("price_min", ""),
                  "price_max": request.args.get("price_max", ""), "sort": sort},
         weapons=sorted({product["weapon"] for product in all_products}),
         qualities=sorted({product["quality"] for product in all_products}),
+        categories=categories,
+        category_paths={category["id"]: category["path"] for category in categories},
         total_products=len(all_products),
     )
 

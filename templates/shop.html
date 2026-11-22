@@ -61,6 +61,13 @@
                 <input class="shop-filter-input" type="search" name="q" value="{{ filters.q }}" placeholder="Наприклад, AWP або Asiimov">
             </label>
             <label>
+                <span class="shop-filter-label">Категорія</span>
+                <select class="shop-filter-input" name="category_id">
+                    <option value="">Усі категорії</option>
+                    {% for category in categories %}<option value="{{ category['id'] }}" {% if filters.category_id == category['id'] %}selected{% endif %}>{{ category['path'] }}</option>{% endfor %}
+                </select>
+            </label>
+            <label>
                 <span class="shop-filter-label">Зброя</span>
                 <select class="shop-filter-input" name="weapon">
                     <option value="">Уся зброя</option>
@@ -117,6 +124,9 @@
                         <div class="flex h-[170px] items-center justify-center bg-gray-100 text-sm text-gray-500">Зображення відсутнє</div>
                     {% endif %}
                     <div class="shop-card-info">
+                        {% if product['category_id'] and category_paths.get(product['category_id']) %}
+                            <p class="mb-2 inline-flex self-start rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">{{ category_paths.get(product['category_id']) }}</p>
+                        {% endif %}
                         <p class="shop-weapon">{{ product['weapon'] }}</p>
                         <h2 class="shop-skin">{{ product['skin'] }}</h2>
                         <p class="shop-quality">{{ product['quality'] }}</p>

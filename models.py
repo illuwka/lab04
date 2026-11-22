@@ -48,6 +48,12 @@ def init_app(app):
 def init_db():
     db = get_db()
     db.executescript("""
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS feedback (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -63,6 +69,7 @@ def init_db():
             price REAL NOT NULL CHECK (price >= 0),
             image_url TEXT NOT NULL DEFAULT '',
             stock INTEGER NOT NULL DEFAULT 10 CHECK (stock >= 0),
+            category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS users (
@@ -84,6 +91,10 @@ def init_db():
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    product_columns = {row["name"] for row in db.execute("PRAGMA table_info(products)")}
+    if "category_id" not in product_columns:
+        db.execute("ALTER TABLE products ADD COLUMN category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_parent_name ON categories(COALESCE(parent_id, 0), name COLLATE NOCASE)")
     user_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
     if "role" not in user_columns:
         db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'customer'")
@@ -138,6 +149,21 @@ def init_db():
         if image_url:
             db.execute("UPDATE products SET image_url = ? WHERE weapon = ? AND skin = ? AND image_url = ''",
                        (image_url, weapon, skin))
+
+    root_id = _get_or_create_category(db, "Скіни CS2", None)
+    weapons_id = _get_or_create_category(db, "Зброя", root_id)
+    _get_or_create_category(db, "Ножі", root_id)
+    _get_or_create_category(db, "Рукавички", root_id)
+    rifles_id = _get_or_create_category(db, "Гвинтівки", weapons_id)
+    pistols_id = _get_or_create_category(db, "Пістолети", weapons_id)
+    rifle_names = ("AWP", "AK-47", "M4A1-S", "M4A4")
+    pistol_names = ("USP-S", "Glock-18", "Desert Eagle")
+    for weapon in rifle_names:
+        db.execute("UPDATE products SET category_id = ? WHERE weapon = ? AND category_id IS NULL", (rifles_id, weapon))
+    for weapon in pistol_names:
+        db.execute("UPDATE products SET category_id = ? WHERE weapon = ? AND category_id IS NULL", (pistols_id, weapon))
+    db.execute("UPDATE products SET category_id = (SELECT id FROM categories WHERE name = 'Ножі' AND parent_id = ? LIMIT 1) WHERE (weapon LIKE '%Knife%' OR weapon IN ('Karambit', 'Butterfly')) AND category_id IS NULL", (root_id,))
+    db.execute("UPDATE products SET category_id = (SELECT id FROM categories WHERE name = 'Рукавички' AND parent_id = ? LIMIT 1) WHERE weapon LIKE '%Gloves%' AND category_id IS NULL", (root_id,))
 
     db.execute("INSERT OR IGNORE INTO promocodes (code, discount_percent) VALUES ('LOQ10', 10)")
 
@@ -235,21 +261,93 @@ def delete_feedback(feedback_id):
     return cursor.rowcount > 0
 
 
+def _get_or_create_category(db, name, parent_id):
+    row = db.execute("SELECT id FROM categories WHERE name = ? COLLATE NOCASE AND parent_id IS ?", (name, parent_id)).fetchone()
+    if row:
+        return row["id"]
+    cursor = db.execute("INSERT INTO categories (name, parent_id) VALUES (?, ?)", (name, parent_id))
+    return cursor.lastrowid
+
+
+def get_categories():
+    rows = [dict(row) for row in get_db().execute("SELECT id, name, parent_id FROM categories ORDER BY name COLLATE NOCASE, id")]
+    by_id = {row["id"]: row for row in rows}
+    for row in rows:
+        chain, seen, current = [], set(), row
+        while current and current["id"] not in seen:
+            seen.add(current["id"])
+            chain.append(current["name"])
+            current = by_id.get(current["parent_id"])
+        row["depth"] = len(chain) - 1
+        row["path"] = " / ".join(reversed(chain))
+    return sorted(rows, key=lambda row: (row["path"].casefold(), row["id"]))
+
+
+def save_category(category_id, name, parent_id=None):
+    db = get_db()
+    name = name.strip()
+    if not name or len(name) > 80:
+        raise ValueError("Назва категорії має містити від 1 до 80 символів.")
+    if category_id is not None:
+        existing = db.execute("SELECT id FROM categories WHERE id = ?", (category_id,)).fetchone()
+        if not existing:
+            raise ValueError("Категорію не знайдено.")
+        if parent_id == category_id:
+            raise ValueError("Категорія не може бути батьківською для самої себе.")
+        descendants = {category_id}
+        changed = True
+        while changed:
+            children = {row[0] for row in db.execute("SELECT id FROM categories WHERE parent_id IN ({})".format(",".join("?" for _ in descendants)), tuple(descendants))} if descendants else set()
+            new_descendants = descendants | children
+            changed = new_descendants != descendants
+            descendants = new_descendants
+        if parent_id in descendants:
+            raise ValueError("Не можна перемістити категорію всередину її підкатегорії.")
+    if parent_id is not None and not db.execute("SELECT 1 FROM categories WHERE id = ?", (parent_id,)).fetchone():
+        raise ValueError("Батьківську категорію не знайдено.")
+    duplicate = db.execute("SELECT 1 FROM categories WHERE name = ? COLLATE NOCASE AND parent_id IS ? AND id IS NOT ?", (name, parent_id, category_id)).fetchone()
+    if duplicate:
+        raise ValueError("Категорія з такою назвою вже є на цьому рівні.")
+    if category_id is None:
+        cursor = db.execute("INSERT INTO categories (name, parent_id) VALUES (?, ?)", (name, parent_id))
+        result = cursor.lastrowid
+    else:
+        db.execute("UPDATE categories SET name = ?, parent_id = ? WHERE id = ?", (name, parent_id, category_id))
+        result = category_id
+    db.commit()
+    return result
+
+
+def delete_category(category_id):
+    db = get_db()
+    row = db.execute("SELECT parent_id FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if not row:
+        return False
+    parent_id = row["parent_id"]
+    db.execute("UPDATE categories SET parent_id = ? WHERE parent_id = ?", (parent_id, category_id))
+    db.execute("UPDATE products SET category_id = ? WHERE category_id = ?", (parent_id, category_id))
+    db.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+    db.commit()
+    return True
+
+
 def get_products():
-    return get_db().execute("SELECT id, weapon, skin, quality, price, image_url, stock FROM products ORDER BY id").fetchall()
+    return get_db().execute("""SELECT p.id, p.weapon, p.skin, p.quality, p.price, p.image_url, p.stock,
+        p.category_id, c.name AS category_name
+        FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.id""").fetchall()
 
 
 def get_product(product_id):
     return get_db().execute("SELECT id, weapon, skin, quality, price, image_url, stock FROM products WHERE id = ?", (product_id,)).fetchone()
 
 
-def save_product(product_id, weapon, skin, quality, price, image_url, stock):
+def save_product(product_id, weapon, skin, quality, price, image_url, stock, category_id=None):
     db = get_db()
-    values = (weapon.strip(), skin.strip(), quality.strip(), price, image_url.strip(), stock)
+    values = (weapon.strip(), skin.strip(), quality.strip(), price, image_url.strip(), stock, category_id)
     if product_id is None:
-        cursor = db.execute("INSERT INTO products (weapon, skin, quality, price, image_url, stock) VALUES (?, ?, ?, ?, ?, ?)", values)
+        cursor = db.execute("INSERT INTO products (weapon, skin, quality, price, image_url, stock, category_id) VALUES (?, ?, ?, ?, ?, ?, ?)", values)
     else:
-        cursor = db.execute("UPDATE products SET weapon=?, skin=?, quality=?, price=?, image_url=?, stock=? WHERE id=?", (*values, product_id))
+        cursor = db.execute("UPDATE products SET weapon=?, skin=?, quality=?, price=?, image_url=?, stock=?, category_id=? WHERE id=?", (*values, product_id))
     db.commit()
     return cursor.lastrowid if product_id is None else cursor.rowcount > 0
 
