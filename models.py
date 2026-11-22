@@ -90,6 +90,12 @@ def init_db():
             usage_limit INTEGER CHECK (usage_limit IS NULL OR usage_limit > 0),
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS favorites (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, product_id)
+        );
     """)
     product_columns = {row["name"] for row in db.execute("PRAGMA table_info(products)")}
     if "category_id" not in product_columns:
@@ -335,6 +341,33 @@ def get_products():
     return get_db().execute("""SELECT p.id, p.weapon, p.skin, p.quality, p.price, p.image_url, p.stock,
         p.category_id, c.name AS category_name
         FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.id""").fetchall()
+
+
+def get_favorite_product_ids(user_id):
+    return {row["product_id"] for row in get_db().execute(
+        "SELECT product_id FROM favorites WHERE user_id = ?", (user_id,)
+    )}
+
+
+def get_favorite_products(user_id):
+    return get_db().execute("""SELECT p.id, p.weapon, p.skin, p.quality, p.price, p.image_url, p.stock,
+        p.category_id, c.name AS category_name
+        FROM favorites f JOIN products p ON p.id = f.product_id
+        LEFT JOIN categories c ON c.id = p.category_id
+        WHERE f.user_id = ? ORDER BY f.created_at DESC, p.id""", (user_id,)).fetchall()
+
+
+def toggle_favorite(user_id, product_id):
+    db = get_db()
+    existing = db.execute("SELECT 1 FROM favorites WHERE user_id = ? AND product_id = ?", (user_id, product_id)).fetchone()
+    if existing:
+        db.execute("DELETE FROM favorites WHERE user_id = ? AND product_id = ?", (user_id, product_id))
+        saved = False
+    else:
+        db.execute("INSERT INTO favorites (user_id, product_id) VALUES (?, ?)", (user_id, product_id))
+        saved = True
+    db.commit()
+    return saved
 
 
 def get_product(product_id):

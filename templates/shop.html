@@ -17,6 +17,8 @@
     .shop-stock { color: #717787; font-size: 12px; }
     .shop-buy { margin-top: auto; border-radius: 6px; background: #f4e500; padding: 11px 14px; color: #17191a; font-size: 14px; font-weight: 700; text-align: center; text-decoration: none; }
     .shop-buy:hover { background: #fff34a; }
+    .shop-favorite { width: 100%; margin: 0 0 10px; border: 1px solid #e0e3e9; border-radius: 6px; background: #fff; padding: 9px 12px; color: #454957; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .shop-favorite:hover, .shop-favorite.is-saved { border-color: #f4e500; background: #fffde5; color: #17191a; }
     .shop-filters { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(130px, 1fr)); gap: 12px; }
     .shop-filter-label { display: block; margin-bottom: 6px; color: #4b5563; font-size: 12px; font-weight: 700; }
     .shop-filter-input { width: 100%; min-height: 42px; border: 1px solid #d1d5db; border-radius: 7px; background: #fff; padding: 9px 11px; color: #202332; }
@@ -134,6 +136,14 @@
                             <span class="shop-price">&#36;{{ "%.2f"|format(product['price']) }}</span>
                             <span class="shop-stock">У наявності: {{ product['stock'] }}</span>
                         </div>
+                        {% if current_user %}
+                            <form method="post" action="{{ url_for('toggle_product_favorite', product_id=product['id']) }}">
+                                <input type="hidden" name="next" value="{{ request.full_path }}">
+                                <button class="shop-favorite{% if product['id'] in favorite_ids %} is-saved{% endif %}" type="submit" aria-pressed="{{ 'true' if product['id'] in favorite_ids else 'false' }}">
+                                    {% if product['id'] in favorite_ids %}♥ У вибраному{% else %}♡ Додати в обране{% endif %}
+                                </button>
+                            </form>
+                        {% endif %}
                         {% if product['stock'] > 0 %}
                             <a class="shop-buy" href="{{ url_for('order_product', product_id=product['id']) }}">Замовити</a>
                         {% else %}

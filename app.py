@@ -9,9 +9,10 @@ from models import (
     create_feedback, create_initial_admin, create_order, delete_feedback,
     delete_order, delete_product, delete_promocode, delete_user, get_all_feedback,
     delete_category, get_available_promocodes, get_categories,
+    get_favorite_product_ids, get_favorite_products,
     get_db, get_orders, get_product, get_products, get_promocodes, get_user,
     get_user_orders, get_users, has_admin, init_app, init_db, save_product,
-    save_category, save_promocode, save_user, update_order, update_order_status,
+    save_category, save_promocode, save_user, toggle_favorite, update_order, update_order_status,
 )
 
 app = Flask(__name__)
@@ -440,8 +441,34 @@ def shop():
         qualities=sorted({product["quality"] for product in all_products}),
         categories=categories,
         category_paths={category["id"]: category["path"] for category in categories},
+        favorite_ids=get_favorite_product_ids(g.current_user["id"]) if g.current_user else set(),
         total_products=len(all_products),
     )
+
+
+@app.route("/favorites")
+@login_required
+def favorites():
+    return render_template(
+        "favorites.html",
+        products=get_favorite_products(g.current_user["id"]),
+        categories=get_categories(),
+        category_paths={category["id"]: category["path"] for category in get_categories()},
+        favorite_ids=get_favorite_product_ids(g.current_user["id"]),
+    )
+
+
+@app.post("/favorites/<int:product_id>/toggle")
+@login_required
+def toggle_product_favorite(product_id):
+    if get_product(product_id) is None:
+        abort(404)
+    saved = toggle_favorite(g.current_user["id"], product_id)
+    flash("Товар додано до обраного." if saved else "Товар видалено з обраного.", "success")
+    target = request.form.get("next", "")
+    if target.startswith("/") and not target.startswith("//"):
+        return redirect(target)
+    return redirect(url_for("favorites"))
 
 
 @app.route("/shop/<int:product_id>/order", methods=["GET", "POST"])
