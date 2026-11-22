@@ -1,19 +1,59 @@
 from pathlib import Path
+from functools import wraps
+import os
 
-from flask import Flask, abort, flash, redirect, render_template, request, url_for
+from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
 
 from models import (
-    ORDER_STATUSES, STATUS_LABELS, create_feedback, create_order, delete_feedback,
-    delete_order, delete_product, delete_user, get_all_feedback, get_db,
-    get_orders, get_product, get_products, get_user, get_users, init_app,
-    init_db, save_product, save_user, update_order, update_order_status,
+    ORDER_STATUSES, STATUS_LABELS, authenticate_user, create_account,
+    create_feedback, create_initial_admin, create_order, delete_feedback,
+    delete_order, delete_product, delete_promocode, delete_user, get_all_feedback,
+    get_available_promocodes,
+    get_db, get_orders, get_product, get_products, get_promocodes, get_user,
+    get_user_orders, get_users, has_admin, init_app, init_db, save_product,
+    save_promocode, save_user, update_order, update_order_status,
 )
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "loq-market-development-key"
+app.config["SECRET_KEY"] = os.environ.get("LOQ_MARKET_SECRET_KEY", "loq-market-development-key")
 Path(app.instance_path).mkdir(parents=True, exist_ok=True)
 app.config["DATABASE"] = str(Path(app.instance_path) / "loq_market.sqlite3")
 init_app(app)
+
+
+@app.before_request
+def load_current_user_and_protect_admin():
+    user_id = session.get("user_id")
+    g.current_user = get_user(user_id) if user_id else None
+    if user_id and g.current_user is None:
+        session.clear()
+
+    endpoint = request.endpoint or ""
+    if endpoint == "admin" or endpoint.startswith("admin_"):
+        if not has_admin():
+            return redirect(url_for("setup_admin"))
+        if g.current_user is None:
+            return redirect(url_for("login", next=request.path))
+        if g.current_user["role"] != "admin":
+            abort(403)
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if g.current_user is None:
+            flash("Увійди, щоб продовжити.", "error")
+            return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped_view
+
+
+@app.context_processor
+def inject_user_navigation():
+    return {
+        "current_user": getattr(g, "current_user", None),
+        "admin_setup_required": not has_admin(),
+    }
 
 
 @app.route("/")
@@ -24,6 +64,82 @@ def home():
 @app.route("/about")
 def about():
     return render_template("about.html")
+
+
+@app.route("/setup/admin", methods=["GET", "POST"])
+def setup_admin():
+    if has_admin():
+        return redirect(url_for("login"))
+    if request.method == "POST":
+        name = request.form.get("name", "")
+        email = request.form.get("email", "")
+        password = request.form.get("password", "")
+        try:
+            user_id = create_initial_admin(name, email, password)
+            session.clear()
+            session["user_id"] = user_id
+            flash("Обліковий запис адміністратора створено.", "success")
+            return redirect(url_for("admin_products"))
+        except ValueError as error:
+            flash(str(error), "error")
+    return render_template("setup_admin.html")
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if g.current_user:
+        return redirect(url_for("shop"))
+    if request.method == "POST":
+        try:
+            user_id = create_account(
+                request.form.get("name", ""),
+                request.form.get("email", ""),
+                request.form.get("password", ""),
+            )
+            session.clear()
+            session["user_id"] = user_id
+            flash("Обліковий запис створено. Можна оформлювати замовлення.", "success")
+            return redirect(url_for("shop"))
+        except ValueError as error:
+            flash(str(error), "error")
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if g.current_user:
+        return redirect(url_for("shop"))
+    next_path = request.args.get("next", "")
+    if request.method == "POST":
+        user = authenticate_user(request.form.get("email", ""), request.form.get("password", ""))
+        if user is None:
+            flash("Неправильна електронна пошта або пароль.", "error")
+        else:
+            session.clear()
+            session["user_id"] = user["id"]
+            next_path = request.form.get("next", "")
+            if next_path.startswith("/") and not next_path.startswith("//"):
+                return redirect(next_path)
+            return redirect(url_for("admin_products" if user["role"] == "admin" else "shop"))
+    return render_template("login.html", next_path=next_path)
+
+
+@app.post("/logout")
+def logout():
+    session.clear()
+    flash("Ти вийшов/вийшла з облікового запису.", "success")
+    return redirect(url_for("home"))
+
+
+@app.route("/account")
+@login_required
+def account():
+    return render_template(
+        "account.html",
+        user=g.current_user,
+        orders=get_user_orders(g.current_user["id"]),
+        status_labels=STATUS_LABELS,
+    )
 
 
 @app.route("/contacts", methods=["GET", "POST"])
@@ -113,9 +229,12 @@ def admin_save_user():
     name = request.form.get("name", "").strip()
     email = request.form.get("email", "").strip()
     try:
-        uid = int(user_id) if user_id else None
-        save_user(uid, name, email)
-        flash("Дані користувача збережено.", "success")
+        if user_id:
+            save_user(int(user_id), name, email, request.form.get("role", "customer"))
+            flash("Дані користувача збережено.", "success")
+        else:
+            create_account(name, email, request.form.get("password", ""))
+            flash("Обліковий запис клієнта створено.", "success")
     except ValueError as error:
         flash(str(error), "error")
     return redirect(url_for("admin_users"))
@@ -123,10 +242,13 @@ def admin_save_user():
 
 @app.post("/admin/users/<int:user_id>/delete")
 def admin_delete_user(user_id):
-    if delete_user(user_id):
-        flash("Користувача та його замовлення видалено.", "success")
-    else:
-        flash("Користувача не знайдено.", "error")
+    try:
+        if delete_user(user_id):
+            flash("Користувача та його замовлення видалено.", "success")
+        else:
+            flash("Користувача не знайдено.", "error")
+    except ValueError as error:
+        flash(str(error), "error")
     return redirect(url_for("admin_users"))
 
 
@@ -154,6 +276,36 @@ def admin_orders():
         statuses=ORDER_STATUSES,
         status_labels=STATUS_LABELS,
     )
+
+
+@app.route("/admin/promocodes")
+def admin_promocodes():
+    return render_template("admin_promocodes.html", promocodes=get_promocodes())
+
+
+@app.post("/admin/promocodes/save")
+def admin_save_promocode():
+    promo_id = request.form.get("promo_id", "").strip()
+    try:
+        promo_id = int(promo_id) if promo_id else None
+        save_promocode(
+            promo_id,
+            request.form.get("code", ""),
+            request.form.get("discount_percent", ""),
+            request.form.get("expires_on"),
+            request.form.get("usage_limit"),
+            request.form.get("active") == "on",
+        )
+        flash("Промокод збережено.", "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("admin_promocodes"))
+
+
+@app.post("/admin/promocodes/<int:promo_id>/delete")
+def admin_delete_promocode(promo_id):
+    flash("Промокод видалено." if delete_promocode(promo_id) else "Промокод не знайдено.", "success")
+    return redirect(url_for("admin_promocodes"))
 
 
 @app.post("/admin/orders/<int:order_id>/status")
@@ -204,32 +356,35 @@ def admin_delete_order(order_id):
 
 @app.route("/shop")
 def shop():
-    return render_template("shop.html", products=get_products())
+    return render_template("shop.html", products=get_products(), promocodes=get_available_promocodes())
 
 
 @app.route("/shop/<int:product_id>/order", methods=["GET", "POST"])
+@login_required
 def order_product(product_id):
     product = get_product(product_id)
     if product is None:
         abort(404)
     if request.method == "POST":
-        customer_name = request.form.get("customer_name", "").strip()
-        customer_email = request.form.get("customer_email", "").strip()
         try:
             quantity = int(request.form.get("quantity", ""))
         except ValueError:
             quantity = 0
-        if not customer_name or not customer_email or "@" not in customer_email:
-            flash("Вкажи ім’я та коректну електронну адресу.", "error")
-            return redirect(url_for("order_product", product_id=product_id))
         try:
-            order_id = create_order(product_id, customer_name, customer_email, quantity)
+            order_id = create_order(
+                product_id,
+                g.current_user["name"],
+                g.current_user["email"],
+                quantity,
+                user_id=g.current_user["id"],
+                promo_code=request.form.get("promo_code", ""),
+            )
         except ValueError as error:
             flash(str(error), "error")
             return redirect(url_for("order_product", product_id=product_id))
         flash(f"Замовлення №{order_id} оформлено.", "success")
-        return redirect(url_for("shop"))
-    return render_template("order.html", product=product)
+        return redirect(url_for("account"))
+    return render_template("order.html", product=product, user=g.current_user)
 
 
 with app.app_context():

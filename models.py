@@ -1,6 +1,9 @@
 import sqlite3
+from datetime import date
+import re
 
 from flask import current_app, g
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 SEED_PRODUCTS = (
@@ -60,9 +63,26 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             email TEXT NOT NULL UNIQUE,
+            role TEXT NOT NULL DEFAULT 'customer' CHECK (role IN ('admin', 'customer')),
+            password_hash TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS promocodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            discount_percent INTEGER NOT NULL CHECK (discount_percent BETWEEN 1 AND 100),
+            active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+            expires_on TEXT,
+            usage_limit INTEGER CHECK (usage_limit IS NULL OR usage_limit > 0),
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    user_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+    if "role" not in user_columns:
+        db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'customer'")
+    if "password_hash" not in user_columns:
+        db.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+
     orders_exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='orders'").fetchone()
     if not orders_exists:
         _create_order_tables(db)
@@ -92,8 +112,16 @@ def init_db():
                 db.execute("ALTER TABLE orders ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE")
             db.execute("CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id)")
 
+    order_columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
+    if "promo_code" not in order_columns:
+        db.execute("ALTER TABLE orders ADD COLUMN promo_code TEXT")
+    if "discount_amount" not in order_columns:
+        db.execute("ALTER TABLE orders ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0")
+
     if db.execute("SELECT COUNT(*) FROM products").fetchone()[0] == 0:
         db.executemany("INSERT INTO products (weapon, skin, quality, price, image_url, stock) VALUES (?, ?, ?, ?, ?, ?)", SEED_PRODUCTS)
+
+    db.execute("INSERT OR IGNORE INTO promocodes (code, discount_percent) VALUES ('LOQ10', 10)")
 
     # Seed users and initial orders if users is empty
     if db.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
@@ -149,6 +177,8 @@ def _create_order_tables(db):
             customer_name TEXT NOT NULL,
             customer_email TEXT NOT NULL,
             total_price REAL NOT NULL CHECK (total_price >= 0),
+            promo_code TEXT,
+            discount_amount REAL NOT NULL DEFAULT 0 CHECK (discount_amount >= 0),
             status TEXT NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending','processing','shipped','completed','cancelled')),
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -217,9 +247,77 @@ def delete_product(product_id):
         return False
 
 
+def has_admin():
+    return get_db().execute("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1").fetchone() is not None
+
+
+def _account_fields(name, email, password):
+    name = name.strip()
+    email = email.strip().lower()
+    if not name or len(name) > 100:
+        raise ValueError("Вкажіть ім’я довжиною до 100 символів.")
+    if not email or len(email) > 254 or "@" not in email:
+        raise ValueError("Вкажіть коректну адресу електронної пошти.")
+    if len(password) < 8:
+        raise ValueError("Пароль має містити щонайменше 8 символів.")
+    return name, email, generate_password_hash(password)
+
+
+def create_account(name, email, password):
+    name, email, password_hash = _account_fields(name, email, password)
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "INSERT INTO users (name, email, role, password_hash) VALUES (?, ?, 'customer', ?)",
+            (name, email, password_hash),
+        )
+        db.commit()
+        return cursor.lastrowid
+    except sqlite3.IntegrityError as error:
+        db.rollback()
+        raise ValueError("Користувач із такою електронною поштою вже існує.") from error
+
+
+def create_initial_admin(name, email, password):
+    name, email, password_hash = _account_fields(name, email, password)
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        if db.execute("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1").fetchone():
+            raise ValueError("Обліковий запис адміністратора вже налаштовано.")
+        existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+        if existing:
+            db.execute(
+                "UPDATE users SET name = ?, role = 'admin', password_hash = ? WHERE id = ?",
+                (name, password_hash, existing["id"]),
+            )
+            user_id = existing["id"]
+        else:
+            cursor = db.execute(
+                "INSERT INTO users (name, email, role, password_hash) VALUES (?, ?, 'admin', ?)",
+                (name, email, password_hash),
+            )
+            user_id = cursor.lastrowid
+        db.commit()
+        return user_id
+    except Exception:
+        db.rollback()
+        raise
+
+
+def authenticate_user(email, password):
+    email = email.strip().lower()
+    user = get_db().execute(
+        "SELECT id, password_hash FROM users WHERE email = ?", (email,)
+    ).fetchone()
+    if user is None or not user["password_hash"] or not check_password_hash(user["password_hash"], password):
+        return None
+    return get_user(user["id"])
+
+
 def get_users():
     db = get_db()
-    users = db.execute("SELECT id, name, email, created_at FROM users ORDER BY id").fetchall()
+    users = db.execute("SELECT id, name, email, role, created_at FROM users ORDER BY id").fetchall()
     result = []
     for u in users:
         orders = get_user_orders(u["id"])
@@ -227,6 +325,7 @@ def get_users():
             "id": u["id"],
             "name": u["name"],
             "email": u["email"],
+            "role": u["role"],
             "created_at": u["created_at"],
             "orders": orders,
             "orders_count": len(orders),
@@ -237,7 +336,7 @@ def get_users():
 
 def get_user(user_id):
     db = get_db()
-    u = db.execute("SELECT id, name, email, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
+    u = db.execute("SELECT id, name, email, role, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
     if u is None:
         return None
     user = dict(u)
@@ -245,18 +344,20 @@ def get_user(user_id):
     return user
 
 
-def save_user(user_id, name, email):
+def save_user(user_id, name, email, role="customer"):
     db = get_db()
     name = name.strip()
-    email = email.strip()
-    if not name or not email or "@" not in email:
+    email = email.strip().lower()
+    if role not in ("admin", "customer"):
+        raise ValueError("Недопустима роль користувача.")
+    if not name or len(name) > 100 or not email or len(email) > 254 or "@" not in email:
         raise ValueError("Вкажіть коректне ім’я та адресу електронної пошти.")
 
     if user_id is None:
         existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
         if existing:
             raise ValueError(f"Користувач із поштою {email} вже існує.")
-        cursor = db.execute("INSERT INTO users (name, email) VALUES (?, ?)", (name, email))
+        cursor = db.execute("INSERT INTO users (name, email, role) VALUES (?, ?, ?)", (name, email, role))
         db.commit()
         return cursor.lastrowid
     else:
@@ -265,7 +366,16 @@ def save_user(user_id, name, email):
             raise ValueError(f"Електронна пошта {email} вже використовується іншим користувачем.")
         db.execute("BEGIN IMMEDIATE")
         try:
-            db.execute("UPDATE users SET name = ?, email = ? WHERE id = ?", (name, email, user_id))
+            current = db.execute("SELECT role, password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+            if current is None:
+                raise ValueError("Користувача не знайдено.")
+            if role == "admin" and not current["password_hash"]:
+                raise ValueError("Цей користувач ще не має пароля й не може увійти як адміністратор.")
+            if current["role"] == "admin" and role != "admin":
+                admin_count = db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0]
+                if admin_count <= 1:
+                    raise ValueError("Неможливо змінити роль останнього адміністратора.")
+            db.execute("UPDATE users SET name = ?, email = ?, role = ? WHERE id = ?", (name, email, role, user_id))
             db.execute("UPDATE orders SET customer_name = ?, customer_email = ? WHERE user_id = ?", (name, email, user_id))
             db.commit()
             return True
@@ -282,6 +392,9 @@ def delete_user(user_id):
         if user is None:
             db.rollback()
             return False
+        role = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()["role"]
+        if role == "admin" and db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0] <= 1:
+            raise ValueError("Неможливо видалити останнього адміністратора.")
         orders = db.execute("SELECT id, status FROM orders WHERE user_id = ?", (user_id,)).fetchall()
         for o in orders:
             if o["status"] != "cancelled":
@@ -298,10 +411,113 @@ def delete_user(user_id):
         raise
 
 
+def get_promocodes():
+    return get_db().execute("""
+        SELECT p.id, p.code, p.discount_percent, p.active, p.expires_on, p.usage_limit,
+               p.created_at,
+               (SELECT COUNT(*) FROM orders o
+                WHERE o.promo_code = p.code AND o.status != 'cancelled') AS used_count
+        FROM promocodes p
+        ORDER BY p.id DESC
+    """).fetchall()
+
+
+def get_available_promocodes():
+    today = date.today().isoformat()
+    return [
+        dict(promo) for promo in get_promocodes()
+        if promo["active"]
+        and (not promo["expires_on"] or promo["expires_on"] >= today)
+        and (promo["usage_limit"] is None or promo["used_count"] < promo["usage_limit"])
+    ]
+
+
+def save_promocode(promo_id, code, discount_percent, expires_on=None, usage_limit=None, active=True):
+    code = code.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9_-]{3,32}", code):
+        raise ValueError("Код має містити 3–32 латинські літери, цифри, дефіс або підкреслення.")
+    try:
+        discount_percent = int(discount_percent)
+        if not 1 <= discount_percent <= 100:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValueError("Знижка має бути цілим числом від 1 до 100 відсотків.")
+    expires_on = (expires_on or "").strip() or None
+    if expires_on:
+        try:
+            date.fromisoformat(expires_on)
+        except ValueError as error:
+            raise ValueError("Вкажіть коректну дату завершення промокоду.") from error
+    if usage_limit in (None, ""):
+        usage_limit = None
+    else:
+        try:
+            usage_limit = int(usage_limit)
+            if usage_limit < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("Ліміт використань має бути додатним цілим числом.")
+
+    db = get_db()
+    values = (code, discount_percent, int(bool(active)), expires_on, usage_limit)
+    try:
+        if promo_id is None:
+            cursor = db.execute(
+                "INSERT INTO promocodes (code, discount_percent, active, expires_on, usage_limit) VALUES (?, ?, ?, ?, ?)",
+                values,
+            )
+            promo_id = cursor.lastrowid
+        else:
+            cursor = db.execute(
+                "UPDATE promocodes SET code=?, discount_percent=?, active=?, expires_on=?, usage_limit=? WHERE id=?",
+                (*values, promo_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("Промокод не знайдено.")
+        db.commit()
+        return promo_id
+    except sqlite3.IntegrityError as error:
+        db.rollback()
+        raise ValueError("Промокод із таким кодом уже існує.") from error
+    except Exception:
+        db.rollback()
+        raise
+
+
+def delete_promocode(promo_id):
+    db = get_db()
+    cursor = db.execute("DELETE FROM promocodes WHERE id = ?", (promo_id,))
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def _promo_discount(db, code, subtotal):
+    code = (code or "").strip().upper()
+    if not code:
+        return None, 0.0
+    promo = db.execute("""
+        SELECT id, code, discount_percent, active, expires_on, usage_limit
+        FROM promocodes WHERE code = ? COLLATE NOCASE
+    """, (code,)).fetchone()
+    if promo is None or not promo["active"]:
+        raise ValueError("Промокод недійсний або вимкнений.")
+    if promo["expires_on"] and promo["expires_on"] < date.today().isoformat():
+        raise ValueError("Термін дії промокоду завершився.")
+    if promo["usage_limit"] is not None:
+        used = db.execute(
+            "SELECT COUNT(*) FROM orders WHERE promo_code = ? AND status != 'cancelled'",
+            (promo["code"],),
+        ).fetchone()[0]
+        if used >= promo["usage_limit"]:
+            raise ValueError("Ліміт використань цього промокоду вичерпано.")
+    return promo["code"], round(subtotal * promo["discount_percent"] / 100, 2)
+
+
 def get_user_orders(user_id):
     db = get_db()
     rows = db.execute("""
-        SELECT o.id, o.user_id, o.customer_name, o.customer_email, o.total_price, o.status, o.created_at
+        SELECT o.id, o.user_id, o.customer_name, o.customer_email, o.total_price,
+               o.promo_code, o.discount_amount, o.status, o.created_at
         FROM orders o
         WHERE o.user_id = ?
         ORDER BY o.created_at DESC, o.id DESC
@@ -322,7 +538,7 @@ def get_user_orders(user_id):
     return orders
 
 
-def create_order(product_id, customer_name, customer_email, quantity, user_id=None, status="pending"):
+def create_order(product_id, customer_name, customer_email, quantity, user_id=None, status="pending", promo_code=""):
     if status not in ORDER_STATUSES:
         raise ValueError("Недопустимий статус замовлення.")
     db = get_db()
@@ -351,10 +567,12 @@ def create_order(product_id, customer_name, customer_email, quantity, user_id=No
             else:
                 user_id = user["id"]
 
-        total = round(product["price"] * quantity, 2)
+        subtotal = round(product["price"] * quantity, 2)
+        applied_promo, discount_amount = _promo_discount(db, promo_code, subtotal)
+        total = round(subtotal - discount_amount, 2)
         cursor = db.execute(
-            "INSERT INTO orders (user_id, customer_name, customer_email, total_price, status) VALUES (?, ?, ?, ?, ?)",
-            (user_id, customer_name.strip(), customer_email.strip(), total, status)
+            "INSERT INTO orders (user_id, customer_name, customer_email, total_price, promo_code, discount_amount, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, customer_name.strip(), customer_email.strip(), total, applied_promo, discount_amount, status)
         )
         order_id = cursor.lastrowid
         db.execute(
@@ -479,7 +697,8 @@ def delete_order(order_id):
 
 
 def get_orders():
-    return get_db().execute("""SELECT o.id, o.user_id, o.customer_name, o.customer_email, o.total_price, o.status, o.created_at,
+    return get_db().execute("""SELECT o.id, o.user_id, o.customer_name, o.customer_email, o.total_price,
+        o.promo_code, o.discount_amount, o.status, o.created_at,
         GROUP_CONCAT(oi.product_name || ' × ' || oi.quantity, ', ') AS items
         FROM orders o LEFT JOIN order_items oi ON oi.order_id=o.id
         GROUP BY o.id ORDER BY o.created_at DESC, o.id DESC""").fetchall()

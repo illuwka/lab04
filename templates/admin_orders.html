@@ -23,6 +23,9 @@
                 <a href="{{ url_for('admin_orders') }}" class="rounded-lg px-4 py-2 transition bg-black text-yellow-400">
                     Замовлення
                 </a>
+                <a href="{{ url_for('admin_promocodes') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
+                    Промокоди
+                </a>
                 <a href="{{ url_for('admin_feedback') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
                     Відгуки
                 </a>
@@ -58,6 +61,9 @@
                                 <td class="px-4 py-4 text-sm text-gray-700">{{ order['items'] or '—' }}</td>
                                 <td class="whitespace-nowrap px-4 py-4 text-sm font-bold text-gray-900">
                                     ${{ '%.2f'|format(order['total_price']) }}
+                                    {% if order['promo_code'] %}
+                                        <div class="mt-1 text-xs font-normal text-green-700">{{ order['promo_code'] }} · −${{ '%.2f'|format(order['discount_amount']) }}</div>
+                                    {% endif %}
                                 </td>
                                 <td class="px-4 py-4">
                                     <span class="inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Адмін-панель — промокоди{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-6xl space-y-6">
+    <div class="flex flex-wrap items-end justify-between gap-4 border-b border-gray-200 pb-5">
+        <div>
+            <p class="mb-1 text-sm font-semibold uppercase tracking-wider text-gray-500">LOQ Market · Адмін</p>
+            <h1 class="text-3xl font-bold text-gray-900">Знижки та промокоди</h1>
+        </div>
+        <nav class="flex flex-wrap gap-2 text-sm font-semibold">
+            <a href="{{ url_for('admin_products') }}" class="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 hover:bg-gray-200">Товари</a>
+            <a href="{{ url_for('admin_users') }}" class="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 hover:bg-gray-200">Користувачі</a>
+            <a href="{{ url_for('admin_orders') }}" class="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 hover:bg-gray-200">Замовлення</a>
+            <a href="{{ url_for('admin_promocodes') }}" class="rounded-lg bg-black px-4 py-2 text-yellow-400">Промокоди</a>
+            <a href="{{ url_for('admin_feedback') }}" class="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 hover:bg-gray-200">Відгуки</a>
+        </nav>
+    </div>
+
+    <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h2 class="mb-1 text-lg font-bold text-gray-900">Створити промокод</h2>
+        <p class="mb-4 text-sm text-gray-600">Код знижки можна обмежити датою завершення та загальною кількістю використань.</p>
+        <form method="post" action="{{ url_for('admin_save_promocode') }}" class="grid grid-cols-1 gap-3 md:grid-cols-6">
+            <input type="hidden" name="promo_id" value="">
+            <label class="text-sm font-medium text-gray-700 md:col-span-2">Код
+                <input name="code" required maxlength="32" pattern="[A-Za-z0-9_-]{3,32}" placeholder="WELCOME15" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 uppercase">
+            </label>
+            <label class="text-sm font-medium text-gray-700">Знижка, %
+                <input type="number" name="discount_percent" min="1" max="100" value="10" required class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+            </label>
+            <label class="text-sm font-medium text-gray-700">Діє до
+                <input type="date" name="expires_on" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+            </label>
+            <label class="text-sm font-medium text-gray-700">Ліміт використань
+                <input type="number" name="usage_limit" min="1" placeholder="Без ліміту" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+            </label>
+            <div class="flex items-end">
+                <button type="submit" class="w-full rounded-md bg-yellow-400 px-4 py-2 font-semibold text-gray-900 hover:bg-yellow-500">Додати</button>
+            </div>
+            <label class="flex items-center gap-2 text-sm text-gray-700 md:col-span-6">
+                <input type="checkbox" name="active" checked class="h-4 w-4 rounded border-gray-300">
+                Промокод активний
+            </label>
+        </form>
+    </div>
+
+    <div class="space-y-3">
+        {% for promo in promocodes %}
+            <article class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                <form method="post" action="{{ url_for('admin_save_promocode') }}" class="grid grid-cols-1 items-end gap-3 md:grid-cols-7">
+                    <input type="hidden" name="promo_id" value="{{ promo.id }}">
+                    <label class="text-sm font-medium text-gray-700 md:col-span-2">Код
+                        <input name="code" value="{{ promo.code }}" required maxlength="32" pattern="[A-Za-z0-9_-]{3,32}" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 uppercase">
+                    </label>
+                    <label class="text-sm font-medium text-gray-700">Знижка, %
+                        <input type="number" name="discount_percent" value="{{ promo.discount_percent }}" min="1" max="100" required class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+                    </label>
+                    <label class="text-sm font-medium text-gray-700">Діє до
+                        <input type="date" name="expires_on" value="{{ promo.expires_on or '' }}" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+                    </label>
+                    <label class="text-sm font-medium text-gray-700">Ліміт
+                        <input type="number" name="usage_limit" value="{{ promo.usage_limit or '' }}" min="1" placeholder="Без ліміту" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+                    </label>
+                    <label class="flex items-center gap-2 pb-2 text-sm text-gray-700">
+                        <input type="checkbox" name="active" {% if promo.active %}checked{% endif %} class="h-4 w-4 rounded border-gray-300">
+                        Активний
+                    </label>
+                    <div class="flex gap-2">
+                        <button type="submit" class="flex-1 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-800">Зберегти</button>
+                    </div>
+                </form>
+                <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 text-sm text-gray-500">
+                    <span>Використань: {{ promo.used_count }}{% if promo.usage_limit %} / {{ promo.usage_limit }}{% endif %}</span>
+                    <form method="post" action="{{ url_for('admin_delete_promocode', promo_id=promo.id) }}" onsubmit="return confirm('Видалити промокод {{ promo.code }}?');">
+                        <button type="submit" class="rounded-md bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100">Видалити</button>
+                    </form>
+                </div>
+            </article>
+        {% else %}
+            <div class="rounded-xl border border-gray-200 bg-white p-8 text-center text-gray-600">Промокодів поки немає.</div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

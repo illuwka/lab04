@@ -21,20 +21,18 @@
 
             {% if product['stock'] > 0 %}
                 <form method="post" class="space-y-4">
-                    <label class="block text-sm font-medium text-gray-700">
-                        Ім’я
-                        <input name="customer_name" required maxlength="100" autocomplete="name"
-                               class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
-                    </label>
-                    <label class="block text-sm font-medium text-gray-700">
-                        Email
-                        <input type="email" name="customer_email" required maxlength="254" autocomplete="email"
-                               class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
-                    </label>
+                    <div class="rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                        Замовлення буде оформлено для <span class="font-semibold text-gray-900">{{ user.name }}</span> ({{ user.email }}).
+                    </div>
                     <label class="block text-sm font-medium text-gray-700">
                         Кількість
                         <input type="number" name="quantity" value="1" min="1" max="{{ product['stock'] }}" required
                                class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+                    </label>
+                    <label class="block text-sm font-medium text-gray-700">
+                        Промокод <span class="font-normal text-gray-500">(необов’язково)</span>
+                        <input name="promo_code" maxlength="32" autocomplete="off" placeholder="Наприклад, LOQ10"
+                               class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 uppercase">
                     </label>
                     <button type="submit" class="w-full rounded-md bg-yellow-300 px-4 py-3 font-bold text-gray-900 hover:bg-yellow-400">
                         Оформити замовлення

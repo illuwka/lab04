@@ -56,7 +56,24 @@
                 <a href="{{ url_for('shop') }}" class="nav-link text-white transition-colors duration-300 hover:underline{% if request.endpoint == 'shop' %} active{% endif %}"{% if request.endpoint == 'shop' %} aria-current="page"{% endif %}>Магазин</a>
                 <a href="{{ url_for('about') }}" class="nav-link text-white transition-colors duration-300 hover:underline{% if request.endpoint == 'about' %} active{% endif %}"{% if request.endpoint == 'about' %} aria-current="page"{% endif %}>Про нас</a>
                 <a href="{{ url_for('contacts') }}" class="nav-link text-white transition-colors duration-300 hover:underline{% if request.endpoint == 'contacts' %} active{% endif %}"{% if request.endpoint == 'contacts' %} aria-current="page"{% endif %}>Зворотний зв'язок</a>
-                <a href="{{ url_for('admin_products') }}" class="nav-link text-white transition-colors duration-300 hover:underline{% if request.endpoint.startswith('admin_') %} active{% endif %}"{% if request.endpoint.startswith('admin_') %} aria-current="page"{% endif %}>Адмін</a>
+                {% if current_user %}
+                    <a href="{{ url_for('account') }}" class="nav-link text-white transition-colors duration-300 hover:underline">Мої замовлення</a>
+                    {% if current_user.role == 'admin' %}
+                        <a href="{{ url_for('admin_products') }}" class="nav-link text-white transition-colors duration-300 hover:underline{% if request.endpoint.startswith('admin_') %} active{% endif %}">Адмін</a>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('logout') }}" class="inline">
+                        <button type="submit" class="nav-link text-white transition-colors duration-300 hover:underline">Вийти</button>
+                    </form>
+                    {% if admin_setup_required %}
+                        <a href="{{ url_for('setup_admin') }}" class="nav-link text-white transition-colors duration-300 hover:underline">Перший адміністратор</a>
+                    {% endif %}
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="nav-link text-white transition-colors duration-300 hover:underline">Увійти</a>
+                    <a href="{{ url_for('register') }}" class="nav-link text-white transition-colors duration-300 hover:underline">Реєстрація</a>
+                    {% if admin_setup_required %}
+                        <a href="{{ url_for('setup_admin') }}" class="nav-link text-white transition-colors duration-300 hover:underline">Перший адміністратор</a>
+                    {% endif %}
+                {% endif %}
             </div>
 
             <!-- Кнопка меню для мобільних пристроїв -->
@@ -74,7 +91,22 @@
             <a href="{{ url_for('shop') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2{% if request.endpoint == 'shop' %} active{% endif %}"{% if request.endpoint == 'shop' %} aria-current="page"{% endif %}>Магазин</a>
             <a href="{{ url_for('about') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2{% if request.endpoint == 'about' %} active{% endif %}"{% if request.endpoint == 'about' %} aria-current="page"{% endif %}>Про нас</a>
             <a href="{{ url_for('contacts') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2{% if request.endpoint == 'contacts' %} active{% endif %}"{% if request.endpoint == 'contacts' %} aria-current="page"{% endif %}>Зворотний зв'язок</a>
-            <a href="{{ url_for('admin_products') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2{% if request.endpoint.startswith('admin_') %} active{% endif %}"{% if request.endpoint.startswith('admin_') %} aria-current="page"{% endif %}>Адмін</a>
+            {% if current_user %}
+                <a href="{{ url_for('account') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2">Мої замовлення</a>
+                {% if current_user.role == 'admin' %}
+                    <a href="{{ url_for('admin_products') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2">Адмін</a>
+                {% endif %}
+                <form method="post" action="{{ url_for('logout') }}"><button type="submit" class="nav-link text-white py-2">Вийти</button></form>
+                {% if admin_setup_required %}
+                    <a href="{{ url_for('setup_admin') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2">Перший адміністратор</a>
+                {% endif %}
+            {% else %}
+                <a href="{{ url_for('login') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2">Увійти</a>
+                <a href="{{ url_for('register') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2">Реєстрація</a>
+                {% if admin_setup_required %}
+                    <a href="{{ url_for('setup_admin') }}" class="nav-link block text-white py-2 transition duration-300 hover:translate-x-2">Перший адміністратор</a>
+                {% endif %}
+            {% endif %}
         </div>
     </nav>
 

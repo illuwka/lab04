@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Реєстрація — LOQ Market{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-lg rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+    <p class="mb-2 text-sm font-semibold uppercase tracking-wider text-gray-500">LOQ Market</p>
+    <h1 class="mb-2 text-3xl font-bold text-gray-900">Створити обліковий запис</h1>
+    <p class="mb-6 text-gray-600">Реєстрація створює обліковий запис клієнта. Ім’я та email автоматично додаватимуться до замовлень.</p>
+    <form method="post" class="space-y-4">
+        <label class="block text-sm font-medium text-gray-700">Ім’я
+            <input name="name" required maxlength="100" autocomplete="name" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+        </label>
+        <label class="block text-sm font-medium text-gray-700">Email
+            <input type="email" name="email" required maxlength="254" autocomplete="email" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+        </label>
+        <label class="block text-sm font-medium text-gray-700">Пароль
+            <input type="password" name="password" required minlength="8" autocomplete="new-password" class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2">
+            <span class="mt-1 block text-xs font-normal text-gray-500">Щонайменше 8 символів</span>
+        </label>
+        <button type="submit" class="w-full rounded-md bg-yellow-300 px-5 py-3 font-bold text-gray-900 hover:bg-yellow-400">Зареєструватися</button>
+    </form>
+    <p class="mt-5 text-sm text-gray-600">Уже маєш обліковий запис? <a class="font-semibold underline" href="{{ url_for('login') }}">Увійти</a></p>
+</section>
+{% endblock %}
