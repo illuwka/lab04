@@ -10,6 +10,12 @@ SEED_PRODUCTS = (
     ("AWP", "Dragon Lore", "Factory New", 1249.00, "", 10),
     ("Karambit", "Doppler - Phase 2", "Factory New", 785.00, "", 10),
     ("AK-47", "Fire Serpent", "Minimal Wear", 612.00, "", 10),
+    ("M4A1-S", "Printstream", "Field-Tested", 98.50, "", 8),
+    ("USP-S", "Kill Confirmed", "Minimal Wear", 76.25, "", 6),
+    ("Glock-18", "Fade", "Factory New", 54.90, "https://community.akamai.steamstatic.com/economy/image/i0CoZ81Ui0m-9KwlBY1L_18myuGuq1wfhWSaZgMttyVfPaERSR0Wqmu7LAocGIGz3UqlXOLrxM-vMGmW8VNxu5Dx60noTyL2kpnj9h1a7s2oaaBoH_yaCW-Ej-8u5bZvHnq1w0Vz62TUzNj4eCiVblMmXMAkROJeskLpkdXjMrzksVTAy9US8PY25So", 12),
+    ("AWP", "Asiimov", "Field-Tested", 89.00, "https://cdn.cs2skins.gg/screenshots/skin-bb633c21fc25/bs/render.avif", 7),
+    ("AK-47", "Neon Rider", "Minimal Wear", 73.40, "https://cdn.cs2skins.gg/screenshots/skin-74e670c4b279/bs/render.avif", 9),
+    ("M4A4", "Howl", "Well-Worn", 245.00, "", 3),
 )
 ORDER_STATUSES = ("pending", "processing", "shipped", "completed", "cancelled")
 STATUS_LABELS = {
@@ -121,8 +127,17 @@ def init_db():
     if "discount_amount" not in order_columns:
         db.execute("ALTER TABLE orders ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0")
 
-    if db.execute("SELECT COUNT(*) FROM products").fetchone()[0] == 0:
-        db.executemany("INSERT INTO products (weapon, skin, quality, price, image_url, stock) VALUES (?, ?, ?, ?, ?, ?)", SEED_PRODUCTS)
+    for weapon, skin, quality, price, image_url, stock in SEED_PRODUCTS:
+        db.execute("""INSERT INTO products (weapon, skin, quality, price, image_url, stock)
+            SELECT ?, ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM products WHERE weapon = ? AND skin = ?)""",
+            (weapon, skin, quality, price, image_url, stock, weapon, skin))
+
+    # Fill missing images on products that were already created from an earlier seed.
+    for weapon, skin, _quality, _price, image_url, _stock in SEED_PRODUCTS:
+        if image_url:
+            db.execute("UPDATE products SET image_url = ? WHERE weapon = ? AND skin = ? AND image_url = ''",
+                       (image_url, weapon, skin))
 
     db.execute("INSERT OR IGNORE INTO promocodes (code, discount_percent) VALUES ('LOQ10', 10)")
 

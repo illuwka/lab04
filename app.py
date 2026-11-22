@@ -356,7 +356,48 @@ def admin_delete_order(order_id):
 
 @app.route("/shop")
 def shop():
-    return render_template("shop.html", products=get_products(), promocodes=get_available_promocodes())
+    all_products = get_products()
+    query = request.args.get("q", "").strip()
+    weapon = request.args.get("weapon", "").strip()
+    quality = request.args.get("quality", "").strip()
+    availability = request.args.get("availability", "").strip()
+    sort = request.args.get("sort", "default").strip()
+
+    def read_price_filter(name):
+        try:
+            value = float(request.args.get(name, ""))
+            return value if value >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    price_min = read_price_filter("price_min")
+    price_max = read_price_filter("price_max")
+    products = [product for product in all_products
+                if (not query or query.casefold() in f"{product['weapon']} {product['skin']} {product['quality']}".casefold())
+                and (not weapon or product["weapon"] == weapon)
+                and (not quality or product["quality"] == quality)
+                and (availability != "in_stock" or product["stock"] > 0)
+                and (price_min is None or product["price"] >= price_min)
+                and (price_max is None or product["price"] <= price_max)]
+
+    if sort == "price_asc":
+        products.sort(key=lambda product: (product["price"], product["weapon"], product["skin"]))
+    elif sort == "price_desc":
+        products.sort(key=lambda product: (-product["price"], product["weapon"], product["skin"]))
+    elif sort == "name":
+        products.sort(key=lambda product: (product["weapon"].casefold(), product["skin"].casefold()))
+
+    return render_template(
+        "shop.html",
+        products=products,
+        promocodes=get_available_promocodes(),
+        filters={"q": query, "weapon": weapon, "quality": quality,
+                 "availability": availability, "price_min": request.args.get("price_min", ""),
+                 "price_max": request.args.get("price_max", ""), "sort": sort},
+        weapons=sorted({product["weapon"] for product in all_products}),
+        qualities=sorted({product["quality"] for product in all_products}),
+        total_products=len(all_products),
+    )
 
 
 @app.route("/shop/<int:product_id>/order", methods=["GET", "POST"])
