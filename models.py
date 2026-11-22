@@ -3,7 +3,7 @@ from datetime import date
 import re
 
 from flask import current_app, g
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import check_password_hash
 
 
 SEED_PRODUCTS = (
@@ -64,6 +64,7 @@ def init_db():
             name TEXT NOT NULL,
             email TEXT NOT NULL UNIQUE,
             role TEXT NOT NULL DEFAULT 'customer' CHECK (role IN ('admin', 'customer')),
+            password TEXT,
             password_hash TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -80,6 +81,8 @@ def init_db():
     user_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
     if "role" not in user_columns:
         db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'customer'")
+    if "password" not in user_columns:
+        db.execute("ALTER TABLE users ADD COLUMN password TEXT")
     if "password_hash" not in user_columns:
         db.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
 
@@ -260,16 +263,16 @@ def _account_fields(name, email, password):
         raise ValueError("Вкажіть коректну адресу електронної пошти.")
     if len(password) < 8:
         raise ValueError("Пароль має містити щонайменше 8 символів.")
-    return name, email, generate_password_hash(password)
+    return name, email, password
 
 
 def create_account(name, email, password):
-    name, email, password_hash = _account_fields(name, email, password)
+    name, email, plain_password = _account_fields(name, email, password)
     db = get_db()
     try:
         cursor = db.execute(
-            "INSERT INTO users (name, email, role, password_hash) VALUES (?, ?, 'customer', ?)",
-            (name, email, password_hash),
+            "INSERT INTO users (name, email, role, password, password_hash) VALUES (?, ?, 'customer', ?, NULL)",
+            (name, email, plain_password),
         )
         db.commit()
         return cursor.lastrowid
@@ -279,7 +282,7 @@ def create_account(name, email, password):
 
 
 def create_initial_admin(name, email, password):
-    name, email, password_hash = _account_fields(name, email, password)
+    name, email, plain_password = _account_fields(name, email, password)
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
     try:
@@ -288,14 +291,14 @@ def create_initial_admin(name, email, password):
         existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
         if existing:
             db.execute(
-                "UPDATE users SET name = ?, role = 'admin', password_hash = ? WHERE id = ?",
-                (name, password_hash, existing["id"]),
+                "UPDATE users SET name = ?, role = 'admin', password = ?, password_hash = NULL WHERE id = ?",
+                (name, plain_password, existing["id"]),
             )
             user_id = existing["id"]
         else:
             cursor = db.execute(
-                "INSERT INTO users (name, email, role, password_hash) VALUES (?, ?, 'admin', ?)",
-                (name, email, password_hash),
+                "INSERT INTO users (name, email, role, password, password_hash) VALUES (?, ?, 'admin', ?, NULL)",
+                (name, email, plain_password),
             )
             user_id = cursor.lastrowid
         db.commit()
@@ -307,10 +310,19 @@ def create_initial_admin(name, email, password):
 
 def authenticate_user(email, password):
     email = email.strip().lower()
-    user = get_db().execute(
-        "SELECT id, password_hash FROM users WHERE email = ?", (email,)
+    db = get_db()
+    user = db.execute(
+        "SELECT id, password, password_hash FROM users WHERE email = ?", (email,)
     ).fetchone()
-    if user is None or not user["password_hash"] or not check_password_hash(user["password_hash"], password):
+    if user is None:
+        return None
+    if user["password"] is not None:
+        if user["password"] != password:
+            return None
+    elif user["password_hash"] and check_password_hash(user["password_hash"], password):
+        db.execute("UPDATE users SET password = ?, password_hash = NULL WHERE id = ?", (password, user["id"]))
+        db.commit()
+    else:
         return None
     return get_user(user["id"])
 
@@ -366,10 +378,10 @@ def save_user(user_id, name, email, role="customer"):
             raise ValueError(f"Електронна пошта {email} вже використовується іншим користувачем.")
         db.execute("BEGIN IMMEDIATE")
         try:
-            current = db.execute("SELECT role, password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+            current = db.execute("SELECT role, password, password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
             if current is None:
                 raise ValueError("Користувача не знайдено.")
-            if role == "admin" and not current["password_hash"]:
+            if role == "admin" and current["password"] is None and not current["password_hash"]:
                 raise ValueError("Цей користувач ще не має пароля й не може увійти як адміністратор.")
             if current["role"] == "admin" and role != "admin":
                 admin_count = db.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0]
