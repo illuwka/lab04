@@ -52,11 +52,11 @@
             </div>
         {% endif %}
         {% if not current_user %}
-            <p class="mt-3 text-sm text-gray-600">Для оформлення замовлення <a class="font-semibold underline" href="{{ url_for('login') }}">увійди</a> або <a class="font-semibold underline" href="{{ url_for('register') }}">створи обліковий запис</a>.</p>
+            <p class="mt-3 text-sm text-gray-600">Для оформлення замовлення <a class="font-semibold underline" href="{{ url_for('auth.login') }}">увійди</a> або <a class="font-semibold underline" href="{{ url_for('auth.register') }}">створи обліковий запис</a>.</p>
         {% endif %}
     </section>
 
-    <form class="mb-6 rounded-xl border border-gray-200 bg-white p-4" method="get" action="{{ url_for('shop') }}" aria-label="Пошук і фільтри товарів">
+    <form class="mb-6 rounded-xl border border-gray-200 bg-white p-4" method="get" action="{{ url_for('shop.shop') }}" aria-label="Пошук і фільтри товарів">
         <div class="shop-filters">
             <label>
                 <span class="shop-filter-label">Пошук</span>
@@ -108,7 +108,7 @@
             </label>
             <div class="shop-filter-actions">
                 <button class="shop-filter-submit" type="submit">Застосувати</button>
-                <a class="shop-filter-reset" href="{{ url_for('shop') }}">Очистити</a>
+                <a class="shop-filter-reset" href="{{ url_for('shop.shop') }}">Очистити</a>
             </div>
         </div>
         <p class="mt-3 text-sm text-gray-500" aria-live="polite">Знайдено товарів: {{ products|length }} з {{ total_products }}</p>
@@ -137,7 +137,7 @@
                             <span class="shop-stock">У наявності: {{ product['stock'] }}</span>
                         </div>
                         {% if current_user %}
-                            <form method="post" action="{{ url_for('toggle_product_favorite', product_id=product['id']) }}">
+                            <form method="post" action="{{ url_for('shop.toggle_product_favorite', product_id=product['id']) }}">
                                 <input type="hidden" name="next" value="{{ request.full_path }}">
                                 <button class="shop-favorite{% if product['id'] in favorite_ids %} is-saved{% endif %}" type="submit" aria-pressed="{{ 'true' if product['id'] in favorite_ids else 'false' }}">
                                     {% if product['id'] in favorite_ids %}♥ У вибраному{% else %}♡ Додати в обране{% endif %}
@@ -145,7 +145,7 @@
                             </form>
                         {% endif %}
                         {% if product['stock'] > 0 %}
-                            <a class="shop-buy" href="{{ url_for('order_product', product_id=product['id']) }}">Замовити</a>
+                            <a class="shop-buy" href="{{ url_for('shop.order_product', product_id=product['id']) }}">Замовити</a>
                         {% else %}
                             <span class="shop-buy" style="background:#e5e7eb;color:#6b7280;cursor:not-allowed">Немає в наявності</span>
                         {% endif %}

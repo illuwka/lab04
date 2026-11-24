@@ -1,4 +1,6 @@
 .venv/
 instance/
+*.sqlite3
 __pycache__/
 *.py[cod]
+.DS_Store

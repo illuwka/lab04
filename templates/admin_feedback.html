@@ -14,19 +14,19 @@
                 Усього: {{ feedback_entries|length }}
             </span>
             <nav class="flex flex-wrap gap-2 text-sm font-semibold">
-                <a href="{{ url_for('admin_products') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
+                <a href="{{ url_for('admin.products') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
                     Товари
                 </a>
-                <a href="{{ url_for('admin_users') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
+                <a href="{{ url_for('admin.users') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
                     Користувачі
                 </a>
-                <a href="{{ url_for('admin_orders') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
+                <a href="{{ url_for('admin.orders') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
                     Замовлення
                 </a>
-                <a href="{{ url_for('admin_promocodes') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
+                <a href="{{ url_for('admin.promocodes') }}" class="rounded-lg px-4 py-2 transition bg-gray-100 text-gray-700 hover:bg-gray-200">
                     Промокоди
                 </a>
-                <a href="{{ url_for('admin_feedback') }}" class="rounded-lg px-4 py-2 transition bg-black text-yellow-400">
+                <a href="{{ url_for('admin.feedback') }}" class="rounded-lg px-4 py-2 transition bg-black text-yellow-400">
                     Відгуки
                 </a>
             </nav>
@@ -55,7 +55,7 @@
                                 <td class="max-w-xl whitespace-pre-wrap px-4 py-4 text-gray-700">{{ entry['message'] }}</td>
                                 <td class="px-4 py-4 text-right">
                                     <form method="post"
-                                          action="{{ url_for('admin_delete_feedback', feedback_id=entry['id']) }}"
+                                          action="{{ url_for('admin.delete_feedback', feedback_id=entry['id']) }}"
                                           onsubmit="return confirm('Видалити цей відгук?');">
                                         <button type="submit" class="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">
                                             Видалити

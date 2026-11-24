@@ -45,12 +45,12 @@
                         <h2 class="favorite-skin">{{ product['skin'] }}</h2>
                         <p class="mt-1 text-xs text-yellow-800">{{ product['quality'] }}</p>
                         <p class="favorite-price">${{ '%.2f'|format(product['price']) }}</p>
-                        <form method="post" action="{{ url_for('toggle_product_favorite', product_id=product['id']) }}">
-                            <input type="hidden" name="next" value="{{ url_for('favorites') }}">
+                        <form method="post" action="{{ url_for('shop.toggle_product_favorite', product_id=product['id']) }}">
+                            <input type="hidden" name="next" value="{{ url_for('shop.favorites') }}">
                             <button type="submit" class="favorite-action">♥ Видалити з обраного</button>
                         </form>
                         {% if product['stock'] > 0 %}
-                            <a class="favorite-order" href="{{ url_for('order_product', product_id=product['id']) }}">Замовити</a>
+                            <a class="favorite-order" href="{{ url_for('shop.order_product', product_id=product['id']) }}">Замовити</a>
                         {% else %}
                             <span class="mt-2 rounded-md bg-gray-100 px-3 py-2 text-center text-sm text-gray-500">Немає в наявності</span>
                         {% endif %}
@@ -62,7 +62,7 @@
         <div class="rounded-xl border border-gray-200 bg-white p-10 text-center">
             <h2 class="mb-2 text-xl font-semibold text-gray-900">Список поки порожній</h2>
             <p class="mb-5 text-gray-600">Додавай товари в обране в каталозі, щоб зберегти їх тут.</p>
-            <a href="{{ url_for('shop') }}" class="inline-block rounded-md bg-yellow-300 px-5 py-3 font-bold text-gray-900 hover:bg-yellow-400">Перейти до магазину</a>
+            <a href="{{ url_for('shop.shop') }}" class="inline-block rounded-md bg-yellow-300 px-5 py-3 font-bold text-gray-900 hover:bg-yellow-400">Перейти до магазину</a>
         </div>
     {% endif %}
 </section>
